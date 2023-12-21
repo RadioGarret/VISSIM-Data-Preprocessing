@@ -1,0 +1,1464 @@
+import os
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
+from itertools import chain, repeat
+import itertools
+import scipy
+from scipy import stats
+from mpl_toolkits.mplot3d import Axes3D
+
+
+
+# def first_in_folder(x, a1, a2, a3, a4, a5, rho, t0, C):
+#     t = t0 * (a1 + a2 * rho) * (1 + a3 * (1 + rho) ** a4 * (x / C) ** a5)
+#     return t
+# def second_in_folder(x, a1, a2, a3, a4, a5, rho, N, t0, C):
+#     t = t0 * (a1 + a2 * N) * (1 + a3 * (1 + rho) ** a4 * (x / C)** a5)
+#     return t
+# def third_in_folder(x, a1, a2, a3, a4, a5, a6, rho, N, t0, C):
+#     t = t0 * (a1 + a2 * N) * (1 + a3 * (1 + N) ** a4 * (1 + rho) ** a5 * (x / C) ** a6)
+#     return t
+# def forth_in_folder(x, a1, a2, a3, a4, a5, a6, a7, a8, rho, N, t0, C):
+#     t = t0 * (a1 + a2 * N) * (a3 + a4 * rho) * (1 + a5 * (1 + N) ** a6 * (1 + rho) ** a7 * (x / C) ** a8)
+#     return t
+# def fifth_in_folder(x, a1, a2, a3, a4, a5, a6, a7, a8, a9, rho, N, t0, C):
+#     t = t0 * (a1 + a2 * N) * (a3 + a4 * rho) * (1 + (a5 * (1 + N) ** a6 + a7 * (1 + rho) ** a8 ) * (x / C) ** a9)
+#     return t
+
+class Fitting:
+    
+    def __init__(self, beta=0):
+        # global variables
+        self.C = 0
+        self.t0 = 0
+        self.C_list = []
+        self.t0_list = []
+        self.V = []
+        self.t = []
+        self.newV = []
+        self.newt = []
+        self.t_estimated = []
+        self.val_result = []
+        self.averaged_V = [] # capacity 구할때 필요함
+        self.averaged_t = [] # capacity 구할때 필요함
+        self.file_name_list = []
+        self.x_list = []
+        self.y_list = []
+        
+        self.V_list = []          
+        self.t_list = []
+        self.V_list_averaged = [] # 초기화
+        self.t_estimated_averaged = [] # 초기화
+        self.file_name_list_averaged = [] # 초기화
+        self.rho_list = []
+        self.r_squared = 0
+        self.N_list = []
+        self.off_list = []
+        self.on_list = []
+        self.averaged_t_list = []
+        self.averaged_V_list = []
+        self.averaged_rho_list = []
+        
+        ## params ##
+        self.alpha = 0
+        self.beta = beta
+        self.limit = 0
+        self.rho = 0
+        
+        ## x,y ##
+        self.cur_x = 0  
+        self.cur_y = 0
+        self.pre_x = 0
+        self.pre_y = 0
+        self.next_x = 0
+        self.next_y = 0
+        
+        ## flag and count ##
+        self.cnt = 0
+        
+        ## info ## 
+        self.fitted_func = 'None'
+
+    # 폴더에 들어있는 파일 모두 볼때
+    def bpr_function(self, x, a1, a2):
+        t = self.t0_list * (1 + a1 * (x / self.C_list) ** a2)
+        return t
+    def Lu_1(self, x, a1, a2, a3):
+        t = self.t0_list * (1 + a1 * (1 + self.rho_list) ** a2 * (x / self.C_list) ** a3)
+        return t
+    def Lu_2(self, x, a1, a2):
+        t = self.t0_list * (1 + a1 * (x / self.C_list) ** a2)
+        return t
+    def Lu_3(self, x, a1, a2):
+        t = self.t0_list * (1 + a1 * (x / self.C_list) ** a2)
+        return t
+    def Lu_4(self, x, a1, a2):
+        t = self.t0_list * (1 + a1 * (x / self.C_list) ** a2)
+        return t
+    def TRUCK1(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = self.t0_list * (a1 + a2 * self.rho_list) * (1 + a3 * (1 + self.rho_list) ** a4 * (x / self.C_list) ** a5)
+        return t
+    def TRUCK2(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = self.t0_list * (a1 + a2 * self.rho_list) * (1 + self.rho_list) ** a3 * (x / self.C_list) ** a4
+        return t
+    def TRUCK3(self, x, a1, a2, a3, a4): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = self.t0_list * (1 + a1 * (x * (1-self.rho_list))/self.C_list) ** a2 * (1 + a3 * (x * self.rho_list)/self.C_list) ** a4 
+        return t
+    def TRUCK4(self, x, a1, a2, a3, a4): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = self.t0_list * a1 * self.rho_list + a2 * (1 + self.rho_list) ** a3 * (x / self.C_list) ** a4
+        return t
+    def TRUCK5(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = self.t0_list * (a1 * (2 - self.rho_list) ** a2 + a3 * (1 + self.rho_list) ** a4 ) * (x / self.C_list) ** a5
+        return t
+    def TRUCK6(self, x, a1, a2, a3, a4): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = self.t0_list * (a1 * (2 - self.rho_list) ** a2 * (1 + self.rho_list) ** a3 ) * (x / self.C_list) ** a4
+        return t
+    def TRUCK7(self, x, a1, a2, a3, a4): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = self.t0_list * (1 +  a1 * (2 - self.rho_list) ** a2 * (1 + self.rho_list) ** a3  * (x / self.C_list) ** a4)
+        return t
+    def TRUCK8(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = self.t0_list * (a1 + a2 * self.rho_list) * (1 +  a3 * (2 - self.rho_list) ** a4 * (1 + self.rho_list) ** a5  * (x / self.C_list) ** a6)
+        return t
+    def TRUCK9(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = self.t0_list * (a1 * (2 - self.rho_list) ** a2 + a3 * (1 +  self.rho_list) ** a4 ) * (x / self.C_list) ** a5
+        return t
+    def TRUCK10(self, x, a1, a2, a3, a4, a5, a6, a7, a8): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t =  (a1 + a2 * self.rho_list) * (a3 + a4 * (1 - self.rho_list)) * (1 +  a5 * (2 - self.rho_list) ** a6 * (1 + self.rho_list) ** a7  * (x / self.C_list) ** a8)
+        return t
+    def TRUCK11(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t =  (a1 + a2 * self.rho_list) * (1 +  a3 * (2 - self.rho_list) ** a4 * (1 + self.rho_list) ** a5  * (x / self.C_list) ** a6)
+        return t
+    def TRUCK12(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t =  (a1 + a2 * self.rho_list) * (1 +  a3 * (1 + self.rho_list) ** a4  * (x / self.C_list) ** a5)
+        return t
+    
+    def N1(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = self.t0_list * (a1 + a2 * self.N_list) * (1 + a3 * (1 + self.rho_list) ** a4 * (x / self.C_list) ** a5)   
+        return t
+    def N2(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = self.t0_list * (1 + a1 * (a2 + a3 * self.N_list) ** a4 * (1 + self.rho_list) ** a5 * (x / self.C_list) ** a6)
+        return t
+    def N3(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = self.t0_list * (a1 + a2 * self.N_list) * (1 + a3 * (1 + self.N_list) ** a4 * (1 + self.rho_list) ** a5 * (x / self.C_list) ** a6)   
+        return t
+    def N4(self, x, a1, a2, a3, a4, a5, a6, a7): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = self.t0_list * (a1 + a2 * self.N_list) * (1 + a3 * (1 + self.N_list) ** a4 * (2 - self.rho_list) ** a5 * (1 + self.rho_list) ** a6 *(x / self.C_list) ** a7)   
+        return t
+    def N5(self, x, a1, a2, a3, a4, a5, a6, a7, a8, a9): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = self.t0_list * (a1 + a2 * self.N_list) * (a3 + a4 * self.rho_list) * (1 + a5 * (1 + self.N_list) ** a6 * (2 - self.rho_list) ** a7 * (1 + self.rho_list) ** a8 *(x / self.C_list) ** a9)   
+        return t
+    def N6(self, x, a1, a2, a3, a4, a5, a6, a7): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = self.t0_list * (a1 + a2 * self.rho_list) * (1 + a3 * (1 + self.N_list) ** a4 * (2 - self.rho_list) ** a5 * (1 + self.rho_list) ** a6 *(x / self.C_list) ** a7)   
+        return t
+    
+    def R1(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N, off, on 순서로 넣어라
+        t = self.t0_list * (1 + a1 * ( 1 + self.off_list ) ** a2 * (1 + self.on_list) ** a3 * (1 + self.rho_list) ** a4 * (x / self.C_list) ** a5)   
+        return t
+    def R2(self, x, a1, a2, a3, a4, a5, a6, a7): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = self.t0_list * (a1 + a2 * self.off_list) * (a3 + a4 * self.on_list)* (1 + a5 * (1 + self.rho_list)** a6 * (x / self.C_list) ** a7 ) 
+        return t
+    def R3(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = self.t0_list * (1 + a1 * ( 1 + self.off_list ) ** a2 * (1 + self.on_list) ** a3 * (2 - self.rho_list) ** a4 *(1 + self.rho_list) ** a5 *  (x / self.C_list) ** a6)   
+        return t
+    def R4(self, x, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = self.t0_list * (a1 + a2 * self.off_list) * (a3 + a4 * self.on_list) * (1 + a5 * ( 1 + self.off_list ) ** a6 * (1 + self.on_list) ** a7 * (2 - self.rho_list) ** a8 *(1 + self.rho_list) ** a9 *  (x / self.C_list) ** a10)   
+        return t
+    def R5(self, x, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = self.t0_list * (a1 + a2 * self.off_list) * (a3 + a4 * self.on_list) * (a5 + a6 * self.rho_list) * (1 + a7 * ( 1 + self.off_list ) ** a8 * (1 + self.on_list) ** a9 * (2 - self.rho_list) ** a10 *(1 + self.rho_list) ** a11 *  (x / self.C_list) ** a12)   
+        return t
+    
+    
+    
+    
+    def C1(self, x, a1, a2, a3, a4, a5, a6, a7, a8): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = self.t0_list * (a1 + a2 * self.rho_list) *  (1 + a3 * ( 1 + self.off_list ) ** a4 * (1 + self.on_list) ** a5 * (2 - self.rho_list) ** a6 *(1 + self.rho_list) ** a7 *  (x / self.C_list) ** a8)   
+        return t
+    def C1_no(self, x, a1, a2, a3, a4, a5, a6, a7, a8): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = (a1 + a2 * self.rho_list) *  (1 + a3 * ( 1 + self.off_list ) ** a4 * (1 + self.on_list) ** a5 * (2 - self.rho_list) ** a6 *(1 + self.rho_list) ** a7 *  (x / self.C_list) ** a8)   
+        return t
+    def C2(self, x, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = (a1 + a2 * self.rho_list) * (a3 + a4 * (1 - self.rho_list)) * (1 + a5 * ( 1 + self.off_list ) ** a6 * (1 + self.on_list) ** a7 * (2 - self.rho_list) ** a8 *(1 + self.rho_list) ** a9 *  (x / self.C_list) ** a10)   
+        return t
+    def C3(self, x, a1, a2, a3, a4, a5, a6, a7, a8): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = (a1 + a2 * self.rho_list) *  (1 + a3 * ( 1 + self.off_list ) ** a4 * (1 + self.on_list) ** a5 * (self.rho_list) ** a6 *(1 + self.rho_list) ** a7 *  (x / self.C_list) ** a8)   
+        return t
+    def C4(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t =  self.t0_list * (1 + a1 * ( 1 + self.off_list ) ** a2 * (1 + self.on_list) ** a3 * (self.rho_list) ** a4 *(1 + self.rho_list) ** a5 *  (x / self.C_list) ** a6)   
+        return t
+    def C5(self, x, a1, a2, a3, a4, a5, a6, a7): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = self.t0_list * (a1 + a2 * self.rho_list) *  (1 + a3 * (1 + self.off_list) ** a4 * (2 - self.rho_list) ** a5 *(1 + self.rho_list) ** a6 *  (x / self.C_list) ** a7)   
+        return t
+    def C6(self, x, a1, a2, a3, a4, a5, a6, a7): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = self.t0_list * (a1 + a2 * self.rho_list) *  (1 + a3 * (1 + self.on_list) ** a4  * (2 - self.rho_list) ** a5 *(1 + self.rho_list) ** a6 *  (x / self.C_list) ** a7)   
+        return t
+    def C7(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = self.t0_list * (a1 + a2 * self.rho_list) *  (1 + a3 * (1 + (2 - self.rho_list) ** a4 * (1 + self.rho_list) ** a5 *  (x / self.C_list) ** a6))   
+        return t
+    def C8(self, x, a1, a2, a3, a4, a5, a6, a7): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = self.t0_list * (a1 + a2 * self.rho_list) *  (1 + ( 1 + self.off_list ) ** a3 * (1 + self.on_list) ** a4 * (2 - self.rho_list) ** a5 *(1 + self.rho_list) ** a6 *  (x / self.C_list) ** a7)   
+        return t
+    def C9(self, x, a1, a2, a3, a4, a5, a6, a7): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = (a1 + a2 * self.rho_list) *  (1 + a3 * ( 1 + self.off_list ) * (1 + self.on_list) ** a4 * (2 - self.rho_list) ** a5 *(1 + self.rho_list) ** a6 *  (x / self.C_list) ** a7)   
+        return t
+    def C10(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = self.t0_list *  (1 + a1 * ( 1 + self.off_list ) ** a2 * (1 + self.on_list) ** a3 * (2 - self.rho_list) ** a4 *(1 + self.rho_list) ** a5 *  (x / self.C_list) ** a6)   
+        return t
+    def C11(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = self.t0_list * (1 + a1 * ( 1 + self.off_list ) * (1 + self.on_list) ** a2 * (2 - self.rho_list) ** a3 *(1 + self.rho_list) ** a4 *  (x / self.C_list) ** a5)   
+        return t
+    def C12(self, x, a1, a2, a3, a4): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = self.t0_list * (1 + a1 * ( 1 + self.off_list ) * (1 + self.on_list) ** a2  *(1 + self.rho_list) ** a3 *  (x / self.C_list) ** a4)   
+        return t
+    def C13(self, x, a1, a2, a3): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = self.t0_list * (1 + a1 * ( 1 + self.off_list ) * (1 + self.on_list) ** a2  *  (x / self.C_list) ** a3)   
+        return t
+    def C14(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = (a1 + a2 * self.rho_list) *  (1 + a3 * ( 1 + self.off_list ) * (1 + self.on_list) ** a4 *(1 + self.rho_list) ** a5 *  (x / self.C_list) ** a6)   
+        return t
+    def C15(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = (a1 + a2 * self.rho_list) *  (1 + a3 * ( 1 + self.off_list ) * (1 + self.on_list) ** a4 *  (x / self.C_list) ** a5)   
+        return t
+    def C16(self, x, a1, a2, a3, a4, a5, a6, a7, a8, a9): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t =  (a1 + a2 * self.rho_list) *  (a3 + a4 *(1 -  self.rho_list)) *  (1 + a5 * ( 1 + self.off_list ) * (1 + self.on_list) ** a6 * (2 - self.rho_list) ** a7 *(1 + self.rho_list) ** a8 *  (x / self.C_list) ** a9)   
+        return t
+    def C17(self, x, a1, a2, a3, a4, a5, a6, a7, a8): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = (a1 + a2 * self.rho_list) *  (a3 + a4 *(1 -  self.rho_list)) *  (1 + a5 * ( 1 + self.off_list ) * (1 + self.on_list) ** a6  *(1 + self.rho_list) ** a7 *  (x / self.C_list) ** a8)   
+        return t
+    def C18(self, x, a1, a2, a3, a4): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = self.t0_list * (1 + a1 * ( 1 + self.off_list ) * (1 + self.on_list) ** a2 * (2 - self.rho_list)  *(1 + self.rho_list) ** a3 *  (x / self.C_list) ** a4)   
+        return t
+    def C19(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = (a1 + a2 * self.rho_list) * (1 + a3 * ( 1 + self.off_list ) * (1 + self.on_list) ** a4 * (2 - self.rho_list)  *(1 + self.rho_list) ** a5 *  (x / self.C_list) ** a6)   
+        return t
+    
+    
+    def bpr_function_in_folder(self, x, a1, a2): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (1 + a1 * (x[2] / x[3]) ** a2)
+        return t
+    def Lu_1_in_folder(self, x, a1, a2, a3):   # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (1 + a1 * (1 + x[1]) **  a2 * (x[2] / x[3]) ** a3)
+        return t
+    def Lu_2_in_folder(self, x, a1, a2):   # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (1 + a1 * (x[2] / x[3]) ** a2)
+        return t
+    def Lu_3_in_folder(self, x, a1, a2):   # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (1 + a1 * (x[2] / x[3]) ** a2)
+        return t
+    def Lu_4_in_folder(self, x, a1, a2):   # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (1 + a1 * (x[2] / x[3]) ** a2)
+        return t
+    def TRUCK1_in_folder(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (a1 + a2 * x[1]) * (1 + a3 * (1 + x[1]) ** a4 * (x[2] / x[3]) ** a5)
+        return t
+    def TRUCK2_in_folder(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (a1 + a2 * x[1]) * (1 + x[1]) ** a3 * (x[2] / x[3]) ** a4
+        return t
+    def TRUCK3_in_folder(self, x, a1, a2, a3, a4): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (1 + a1 * (x[2] * (1-x[1]))/self.C_list) ** a2 * (1 + a3 * (x[2] * x[1])/x[3]) ** a4 
+        return t
+    def TRUCK4_in_folder(self, x, a1, a2, a3, a4): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * a1 * x[1] + a2 * (1 + x[1]) ** a3 * (x[2] / x[3]) ** a4
+        return t
+    def TRUCK5_in_folder(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (a1 * (2 - x[1]) ** a2 + a3 * (1 + x[1]) ** a4 ) * (x[2] / x[3]) ** a5
+        return t
+    def TRUCK6_in_folder(self, x, a1, a2, a3, a4): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (a1 * (2 - x[1]) ** a2  * (1 + x[1]) ** a3 ) * (x[2] / x[3]) ** a4
+        return t
+    def TRUCK7_in_folder(self, x, a1, a2, a3, a4): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = x[0] * (1 + a1 * (2 - x[1]) ** a2  * (1 + x[1]) ** a3  * (x[2] / x[3]) ** a4 )
+        return t
+    def TRUCK8_in_folder(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (a1 + a2 * x[1]) * (1 + a3 * (2 - x[1]) ** a4  * (1 + x[1]) ** a5  * (x[2] / x[3]) ** a6 )
+        return t
+    def TRUCK9_in_folder(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (a1* (2 - x[1]) ** a2 + a3 * (1 +  x[1]) ** a4 ) * (x[2] / x[3]) ** a5
+        return t
+    def TRUCK10_in_folder(self, x, a1, a2, a3, a4, a5, a6, a7, a8): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = (a1 + a2 * x[1]) * (a3 + a4 * (1 - x[1])) * (1 +  a5 * (2 - x[1]) ** a6 * (1 + x[1]) ** a7  * (x[2] / x[3]) ** a8)
+        return t
+    def TRUCK11_in_folder(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t =  (a1 + a2 * x[1]) * (1 + a3 * (2 - x[1]) ** a4  * (1 + x[1]) ** a5  * (x[2] / x[3]) ** a6 )
+        return t
+    def TRUCK12_in_folder(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t =  (a1 + a2 * x[1]) * (1 + a3 * (1 + x[1]) ** a4  * (x[2] / x[3]) ** a5 )
+        return t
+    
+    
+    def N1_in_folder(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = x[0] * (a1 + a2 * x[4]) * (1 + a3 * (1 + x[1]) ** a4 * (x[2] / x[3]) ** a5)
+        return t
+    def N2_in_folder(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (1 + a1 * (a2 + a3 * x[4]) ** a4 * (1 + x[1]) ** a5 * (x[2] / x[3]) ** a6)
+        return t
+    def N3_in_folder(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (a1 + a2 * x[4]) * (1 + a3 * (1 + x[4]) ** a4 * (1 + x[1]) ** a5 * (x[2] / x[3]) ** a6)   
+        return t
+    def N4_in_folder(self, x, a1, a2, a3, a4, a5, a6, a7): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (a1 + a2 * x[4]) * (1 + a3 * (1 + x[4]) ** a4 * (2 - x[1]) ** a5 * (1 + x[1]) ** a6 *(x[2] / x[3]) ** a7)   
+        return t
+    def N5_in_folder(self, x, a1, a2, a3, a4, a5, a6, a7, a8, a9): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (a1 + a2 * x[4]) * (a3 + a4 * x[1]) * (1 + a5 * (1 + x[4]) ** a6 * (2 - x[1]) ** a7 * (1 + x[1]) ** a8 *(x[2] / x[3]) ** a9)   
+        return t
+    def N6_in_folder(self, x, a1, a2, a3, a4, a5, a6, a7): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (a1 + a2 * x[1]) * (1 + a3 * (1 + x[4]) ** a4 * (2 - x[1]) ** a5 * (1 + x[1]) ** a6 *(x[2] / x[3]) ** a7)   
+        return t
+    
+    
+    
+    def R1_in_folder(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N, off, on 순서로 넣어라
+        t = x[0] * (1 + a1 * ( 1 + x[5] ) ** a2 * (1 + x[6]) ** a3 * (1 + x[1]) ** a4 * (x[2] / x[3]) ** a5)   
+        return t
+    def R2_in_folder(self, x, a1, a2, a3, a4, a5, a6, a7): # t0, rho, V, C, N, off, on  순서로 넣어라
+        t = x[0] * (a1 + a2 * x[5]) * (a3 + a4 * x[6])* (1 + a5 * (1 + x[1])** a6 * (x[2] / x[3]) ** a7 ) 
+        return t
+    def R3_in_folder(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N, off, on 순서로 넣어라
+        t = x[0] * (1 + a1 * ( 1 + x[5]) ** a2 * (1 + x[6]) ** a3 * (2 - x[1]) ** a4 *(1 + x[1]) ** a5 *  (x[2] / x[3]) ** a6)   
+        return t
+    def R4_in_folder(self, x, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10): # t0, rho, V, C, N, off, on 순서로 넣어라
+        t = x[0] * (a1 + a2 * x[5]) * (a3 + a4 * x[6]) * (1 + a5 * (1 + x[5]) ** a6 * (1 + x[6]) ** a7 * (2 - x[1]) ** a8 *(1 + x[1]) ** a9 *  (x[2] / x[3]) ** a10)   
+        return t
+    def R5_in_folder(self, x, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = x[0] * (a1 + a2 * x[5]) * (a3 + a4 * x[6]) * (a5 + a6 * x[1]) * (1 + a7 * ( 1 + x[5]) ** a8 * (1 + x[6]) ** a9 * (2 - x[1]) ** a10 *(1 + x[1]) ** a11 *  (x[2] / x[3]) ** a12)   
+        return t
+    
+    
+    def C1_in_folder(self, x, a1, a2, a3, a4, a5, a6, a7, a8): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = x[0] * (a1 + a2 * x[1]) * (1 + a3 * ( 1 + x[5]) ** a4 * (1 + x[6]) ** a5 * (2 - x[1]) ** a6 *(1 + x[1]) ** a7 *  (x[2] / x[3]) ** a8)   
+        return t
+    def C1_no_in_folder(self, x, a1, a2, a3, a4, a5, a6, a7, a8): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = (a1 + a2 * x[1]) * (1 + a3 * ( 1 + x[5]) ** a4 * (1 + x[6]) ** a5 * (2 - x[1]) ** a6 *(1 + x[1]) ** a7 *  (x[2] / x[3]) ** a8)   
+        return t
+    def C2_in_folder(self, x, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = (a1 + a2 * x[1]) * (a3 + a4 *(1 - x[1])) * (1 + a5 * ( 1 + x[5]) ** a6 * (1 + x[6]) ** a7 * (2 - x[1]) ** a8 *(1 + x[1]) ** a9 *  (x[2] / x[3]) ** a10)   
+        return t
+    def C3_in_folder(self, x, a1, a2, a3, a4, a5, a6, a7, a8): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = (a1 + a2 * x[1]) * (1 + a3 * ( 1 + x[5]) ** a4 * (1 + x[6]) ** a5 * (x[1]) ** a6 *(1 + x[1]) ** a7 *  (x[2] / x[3]) ** a8)   
+        return t
+    def C4_in_folder(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t =  x[0] * (1 + a1 * ( 1 + x[5]) ** a2 * (1 + x[6]) ** a3 * (x[1]) ** a4 *(1 + x[1]) ** a5 *  (x[2] / x[3]) ** a6)   
+        return t
+    def C5_in_folder(self, x, a1, a2, a3, a4, a5, a6, a7): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = x[0] * (a1 + a2 * x[1]) * (1 + a3 * ( 1 + x[5]) ** a4 * (2 - x[1]) ** a5 *(1 + x[1]) ** a6 *  (x[2] / x[3]) ** a7)   
+        return t
+    def C6_in_folder(self, x, a1, a2, a3, a4, a5, a6, a7): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = x[0] * (a1 + a2 * x[1]) * (1 + a3 * (1 + x[6]) ** a4 * (2 - x[1]) ** a5 *(1 + x[1]) ** a6 *  (x[2] / x[3]) ** a7)   
+        return t
+    def C7_in_folder(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = x[0] * (a1 + a2 * x[1]) * (1 + a3 * (2 - x[1]) ** a4 *(1 + x[1]) ** a5 *  (x[2] / x[3]) ** a6)   
+        return t
+    def C8_in_folder(self, x, a1, a2, a3, a4, a5, a6, a7): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = x[0] * (a1 + a2 * x[1]) * (1 + ( 1 + x[5]) ** a3 * (1 + x[6]) ** a4 * (2 - x[1]) ** a5 *(1 + x[1]) ** a6 *  (x[2] / x[3]) ** a7)   
+        return t
+    def C9_in_folder(self, x, a1, a2, a3, a4, a5, a6, a7): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = (a1 + a2 * x[1]) * (1 + a3 * ( 1 + x[5]) * (1 + x[6]) ** a4 * (2 - x[1]) ** a5 *(1 + x[1]) ** a6 *  (x[2] / x[3]) ** a7)   
+        return t
+    def C10_in_folder(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = x[0] * (1 + a1 * ( 1 + x[5]) ** a2 * (1 + x[6]) ** a3 * (2 - x[1]) ** a4 *(1 + x[1]) ** a5 *  (x[2] / x[3]) ** a6)   
+        return t
+    def C11_in_folder(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = x[0] * (1 + a1 * ( 1 + x[5]) * (1 + x[6]) ** a2 * (2 - x[1]) ** a3 *(1 + x[1]) ** a4 *  (x[2] / x[3]) ** a5)   
+        return t
+    def C12_in_folder(self, x, a1, a2, a3, a4): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = x[0] * (1 + a1 * ( 1 + x[5]) * (1 + x[6]) ** a2 * (1 + x[1]) ** a3 *  (x[2] / x[3]) ** a4)   
+        return t
+    def C13_in_folder(self, x, a1, a2, a3): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = x[0] * (1 + a1 * ( 1 + x[5]) * (1 + x[6]) ** a2 * (x[2] / x[3]) ** a3)   
+        return t
+    def C14_in_folder(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = (a1 + a2 * x[1]) * (1 + a3 * ( 1 + x[5]) * (1 + x[6]) ** a4  *(1 + x[1]) ** a5 *  (x[2] / x[3]) ** a6)   
+        return t
+    def C15_in_folder(self, x, a1, a2, a3, a4, a5): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = (a1 + a2 * x[1]) * (1 + a3 * ( 1 + x[5]) * (1 + x[6]) ** a4  * (x[2] / x[3]) ** a5)   
+        return t
+    def C16_in_folder(self, x, a1, a2, a3, a4, a5, a6, a7, a8, a9): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = (a1 + a2 * x[1]) * (a3 + a4 *(1 - x[1])) *(1 + a5 * ( 1 + x[5]) * (1 + x[6]) ** a6 * (2 - x[1]) ** a7 *(1 + x[1]) ** a8 *  (x[2] / x[3]) ** a9)   
+        return t
+    def C17_in_folder(self, x, a1, a2, a3, a4, a5, a6, a7, a8): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = (a1 + a2 * x[1]) * (a3 + a4 *(1 - x[1])) *(1 + a5 * ( 1 + x[5]) * (1 + x[6]) ** a6 * (1 + x[1]) ** a7 *  (x[2] / x[3]) ** a8)   
+        return t
+    def C18_in_folder(self, x, a1, a2, a3, a4): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = x[0] * (1 + a1 * ( 1 + x[5]) * (1 + x[6]) ** a2 * (2 - x[1]) *(1 + x[1]) ** a3 *  (x[2] / x[3]) ** a4)   
+        return t
+    def C19_in_folder(self, x, a1, a2, a3, a4, a5, a6): # t0, rho, V, C, N , off, on 순서로 넣어라
+        t = (a1 + a2 * x[1]) * (1 + a3 * ( 1 + x[5]) * (1 + x[6]) ** a4 * (2 - x[1]) *(1 + x[1]) ** a5 *  (x[2] / x[3]) ** a6)   
+        return t
+    
+    # 파일 하나씩 볼때 
+    def bpr_function_one(self, x, a1, a2):
+        t = self.t0 * (1 + a1 * (x / self.C) ** a2)
+        return t
+    def Lu_1_one(self, x, a1, a2, a3):
+        t = self.t0 * (1 + a1 * (1 + self.rho) ** a2 * (x / self.C) ** a3)
+        return t
+    def Lu_2_one(self, x, a1, a2):
+        t = self.t0 * (1 + a1 * (x / self.C) ** a2)
+        return t
+    def Lu_3_one(self, x, a1, a2):
+        t = self.t0 * (1 + a1 * (x / self.C) ** a2)
+        return t
+    def Lu_4_one(self, x, a1, a2):
+        t = self.t0 * (1 + a1 * (x / self.C) ** a2)
+        return t
+    
+
+    # 각 cycle의 시작 인덱스를 찾는 함수
+    def find_cycle_start_indices(self, arr):
+        cycle_start_indices = []
+        prev_value = arr[0]
+        for i, value in enumerate(arr):
+            if value <= prev_value:
+                cycle_start_indices.append(i)
+            prev_value = value
+        return cycle_start_indices
+
+    
+    def calculate_C(self, A): # capacity가 외부에서 주어지지 않은 상황에서 써먹는 함수임. 
+        result = 0
+        max_diff = 0
+        for i in range(len(self.averaged_V)): # 20이라고 한다면, 0~19까지 접근가능
+            if self.averaged_V[i] > 2000:
+                if i < len(self.averaged_V)-1:  #17까지만
+                    self.cur_x = self.averaged_V[i]
+                    self.cur_y = self.averaged_t[i]
+                    self.pre_x = self.averaged_V[i-1]
+                    self.pre_y = self.averaged_t[i-1]
+                    self.next_x = self.averaged_V[i+1]
+                    self.next_y = self.averaged_t[i+1]
+                    
+                    first_incl = (abs(self.cur_y-self.pre_y)/abs(self.cur_x-self.pre_x)) * 10000
+                    second_incl = (abs(self.next_y-self.cur_y)/abs(self.next_x-self.cur_x)) * 10000
+                    diff = first_incl - second_incl
+                    
+                    if diff > max_diff:
+                        max_diff = diff
+                        result = self.cur_x
+                        print("[capacity] 꺾이는 점으로 capacity를 설정합니다.")####################################################
+                        
+        if max_diff == 0:
+            result = (A // 10) * 2200
+            print('[capacity] 꺾이는 지점이 없어, 기본값으로 설정합니다. ')####################################################
+        return result
+                    
+    def calculate_t0(self, XXX, B): # B는 int값
+#         x = 68.8
+        x = 69.16
+        y = 99.45
+        if XXX == "LOV":
+            return x
+        elif XXX == "HGV":
+            return y
+        elif XXX == "AVG":
+            result = (B/10*y + (10-B/10)*x)/10
+            print("free flow travel time:", result)
+            return result
+        else:
+            print("에러!!")
+            return 0  # 기본값 0으로 변경
+
+    def calculate_r_squared(self, y_true, y_pred):
+        print("Calculate R-squared (coefficient of determination)")
+        ss_total = np.sum((y_true - np.mean(y_true))**2)
+        ss_residual = np.sum((y_true - y_pred)**2)
+        
+        print('y값의 평균:', np.mean(y_true))
+        print('SSR(예측값과의 편차 값):', ss_residual)
+        print('SST(평균과의 편차 값):', ss_total)
+        
+        r_squared = 1 - (ss_residual / ss_total)
+        print('r^2:', r_squared)
+        return r_squared
+    
+    def empty_lists(self):
+        self.C_list = []
+        self.t0_list = []
+        self.V_list = []          
+        self.t_list = []          
+        self.rho_list = []
+        self.file_name_list = []
+        self.newt = []
+        self.newV = []
+        self.t_estimated = []
+        self.x_list = []
+        self.y_list = []
+        self.N_list = []
+        self.off_list = []
+        self.on_list = []
+        self.averaged_t_list = []
+        self.averaged_V_list = []
+        self.averaged_rho_list = []
+        
+
+    def estimate_parameters(self, func_name, folder_path, limits=None):
+        
+        for file_name, limit in zip(os.listdir(folder_path), limits):
+            if file_name.endswith(".csv"):
+                print('-------------------------------------------------------------------------------------------------')
+                print('-------------------------------------------------------------------------------------------------')
+                #### 비우고 시작 ####
+                self.averaged_V = [] 
+                self.averaged_t = []
+                self.V = []
+                self.t = []
+                
+                file_path = os.path.join(folder_path, file_name)
+                
+                ##### 1. 파일 이름 분석하기 #####
+                parts = file_name.split("_")
+                A = int(parts[0])
+                B = int(parts[1])
+                XXX = parts[3].split(".")[0]
+                
+                # 할 필요 없는 상황 없애기
+                if (B==0 and XXX=='HGV') or (B==100 and XXX=='LOV'):
+                    continue
+                
+                ##### 2. 데이터 읽어들이기 #####
+                data = pd.read_csv(file_path)
+                self.V = data["index"].values
+                self.t = data[f"{A}_{B}%_{XXX}"].values
+                print("file_name : ", file_name)
+                
+                ##### 3. 5개의 점 Averaging #####
+                self.averaged_V = [] # 비우고 시작
+                self.averaged_t = []
+                for i in range(0, len(self.V), 5): # 한줄에 다섯개씩이니까 이렇게 됨
+                    average = np.average(self.V[i:i+5])
+                    self.averaged_V.append(average)
+                for i in range(0, len(self.t), 5): # 한줄에 다섯개씩이니까 이렇게 됨
+                    average = np.average(self.t[i:i+5])
+                    self.averaged_t.append(average)
+                
+                ##### 4. Capacity 설정하기 ######                    
+                if limit != 0:           
+                    self.C = limit
+                    print('[capacity] 주어진 값으로 capacity 설정 완료')
+                else: # limit = 0일 경우
+                    self.C = self.calculate_C(A)        
+                    
+                self.t0 = self.calculate_t0(XXX, B)
+                if self.calculate_t0(XXX, B) is None:
+                    continue
+
+                    
+                ####### 5. curve fitting 및 그래프 그리기 ######
+                plt.scatter(self.V, self.t, label="All Data Points")
+                
+                ##### 6. 사전에 설정된 capacity에 따라 데이터 자르기 #####
+                if len(self.V) > 0:
+                    print("self.C:", self.C)
+                    indices = np.where(self.V > self.C)[0]
+                    if len(indices) != 0:
+                        self.newV = self.V[:indices[0]]
+                        self.newt = self.t[:indices[0]]
+                        if np.max(self.newV)!=0:
+                            print('max V:', np.max(self.newV))
+                else:
+                    print("No data points in the valid range.")
+
+                # Curve Fitting
+                if func_name == 'BPR':
+                    popt, pcov = curve_fit(self.bpr_function, self.newV, self.newt)
+                    self.t_estimated = self.bpr_function(self.newV, *popt)
+                    self.fitted_func = 'standard BPR'
+                # elif ~~ :
+
+                # Drawing
+                plt.scatter(self.newV, self.newt, label="Valid Data Points")
+                plt.scatter(self.averaged_V, self.averaged_t, label="Average Data Points")
+                plt.plot(self.newV, self.t_estimated, 'r-', label=self.fitted_func)
+                plt.xlabel("Volume[veh]")
+                plt.ylabel("Travel Time[s]")
+                plt.title(f"A: {A}, B: {B}, XXX: {XXX}")
+                plt.legend()
+                plt.show()
+
+                # Display parameters
+                print('popt:', popt)
+
+                # Calculate r^2 and Add R-squared value to the plot
+                self.r_squared = self.calculate_r_squared(self.newt, self.t_estimated)
+                plt.text(0.95, 0.05, f'R-squared = {self.r_squared:.2f}', transform=plt.gca().transAxes, ha='right')
+                self.val_result.append(self.r_squared)
+        
+    def estimate_parameters_in_folder(self, func_name, folder_path, limits=None, none_zero=1, p_0 = None):
+        # 주어진 데이터를, 주어진 함수로 fitting해보기
+        
+        
+        #### 비우고 시작 ####
+        self.empty_lists()
+        self.cnt = 0
+        
+        for file_name in os.listdir(folder_path):
+            if file_name.endswith(".csv"):
+                #### 비우고 시작 ####
+                self.averaged_V = [] # 비우고 시작
+                self.averaged_t = []
+                self.rho = 0
+                
+                file_path = os.path.join(folder_path, file_name)
+                
+                ##### 1. 파일 이름 분석하기 #####
+                parts = file_name.split("_")
+                A = int(parts[0])
+                B = int(parts[1])
+                C = parts[2]
+                both_numbers = C.split("-")
+                off_percent = int(both_numbers[0]) * 0.01
+                on_percent = int(both_numbers[1]) * 0.01
+                if A % 10 == 1:
+                    on_percent = 0
+#                     print('on_percent is zero')
+                elif A % 10 == 2:
+                    off_percent = 0
+#                     print('off_percent is zero')
+                XXX = parts[3].split(".")[0]
+                self.rho = B * 0.01
+                N = A//10 # 2, 3, 4
+                
+                print('ssibal')
+                
+                ##### 2. 데이터 읽어들이기 #####
+                data = pd.read_csv(file_path)
+                self.V = data["index"].values
+                self.t = data[f"{A}_{B}%_{XXX}"].values
+                print('ssibal')
+                
+                ##### 3. 5개의 점 Averaging #####
+                for i in range(0, len(self.V), 5): # 한줄에 다섯개씩이니까 이렇게 됨
+                    print('ssibal')
+                    average = np.average(self.V[i:i+5])
+                    self.averaged_V.append(average)
+                for i in range(0, len(self.t), 5): # 한줄에 다섯개씩이니까 이렇게 됨
+                    average = np.average(self.t[i:i+5])
+                    self.averaged_t.append(average)
+                
+                # 향후 3D 그림을 위해서 저장
+                self.averaged_V_list.append(self.averaged_V)
+                self.averaged_t_list.append(self.averaged_t)
+                
+                ##### 4. Capacity, t0 설정하기 ######
+                if limits is not None:
+                    limit = limits[self.cnt]
+                    if limit != 0:           
+                        self.C = limit
+#                         print('[capacity] 주어진 값으로 capacity 설정 완료')####################################################
+                    else: # limit = 0일 경우
+                        self.C = self.calculate_C(A)
+                    self.cnt += 1
+                else:
+                    self.C = self.calculate_C(A)  # limits가 주어지지 않은 경우, limit=0으로 설정합니다.
+
+                self.t0 = self.calculate_t0(XXX, B)
+                if self.calculate_t0(XXX, B) is None:
+                    continue
+                # 할 필요 없는 상황 없애기 -> fitting 할때 0의 데이터가 들어가 있으면 안된다. 
+                if (B==0 and XXX=='HGV') or (B==100 and XXX=='LOV'):
+#                     print('의미없는  상황제거완료')#####################################################
+                    continue
+                
+                ##### 6. 사전에 설정된 capacity에 따라 데이터 자르기 #####
+#                 print('-------------------------------------------------------------------------------------------------')
+#                 print('-------------------------------------------------------------------------------------------------')
+#                 print("file_name : ", file_name)####################################################
+                if len(self.V) > 0:
+#                     print("self.C:", self.C)####################################################
+                    indices = np.where(self.V > self.C)[0]
+                    if len(indices) != 0:
+                        self.newV = self.V[:indices[0]] # list
+                        self.newt = self.t[:indices[0]]
+                        
+#                         if np.max(self.newV)!=0:####################################################
+#                             print('max V:', np.max(self.newV))####################################################
+                else:
+                    print("No data points in the valid range.")
+                
+                self.V_list.append(self.newV)
+                self.t_list.append(self.newt)
+                self.t0_list.append(repeat(self.t0, len(self.newV)))
+                self.C_list.append(repeat(self.C, len(self.newV)))
+                self.rho_list.append(repeat(self.rho, len(self.newV)))
+                self.N_list.append(repeat(N, len(self.newV)))
+                self.off_list.append(repeat(off_percent, len(self.newV)))
+                self.on_list.append(repeat(on_percent, len(self.newV)))
+                self.averaged_rho_list.append(repeat(self.rho, len(self.averaged_V)))
+                self.file_name_list.append(repeat(file_name, len(self.averaged_V)))  ## 길이는 averaged_V의 갯수만큼만!!
+                self.XXX = XXX
+        
+        ### 1차원 배열로 변경 ###
+        self.V_list = list(itertools.chain(*self.V_list))
+        self.t_list = list(itertools.chain(*self.t_list))
+        self.t0_list = list(itertools.chain(*self.t0_list))
+        self.C_list = list(itertools.chain(*self.C_list))
+        self.rho_list = list(itertools.chain(*self.rho_list))
+        self.file_name_list = list(itertools.chain(*self.file_name_list))
+        self.N_list = list(itertools.chain(*self.N_list))
+        self.off_list = list(itertools.chain(*self.off_list))
+        self.on_list = list(itertools.chain(*self.on_list))
+        self.averaged_rho_list = list(itertools.chain(*self.averaged_rho_list))
+        
+        ################  t0, rho, V, C, N, off, on 순서로 넣어라 ###############
+        self.x_list.append(self.t0_list)
+        self.x_list.append(self.rho_list)
+        self.x_list.append(self.V_list)
+        self.x_list.append(self.C_list)
+        self.x_list.append(self.N_list)
+        self.x_list.append(self.off_list)
+        self.x_list.append(self.on_list)
+#         self.x_list.append(self.file_name_list) # 하면 안됨
+        self.x_list = np.array(self.x_list)
+        self.y_list = np.array(self.t_list)
+        
+        # np array로 변환
+        self.V_list = np.array(self.V_list)
+        self.t0_list = np.array(self.t0_list)
+        self.C_list = np.array(self.C_list)
+        self.rho_list = np.array(self.rho_list)
+        self.N_list = np.array(self.N_list)
+        self.off_list = np.array(self.off_list)
+        self.on_list = np.array(self.on_list)
+        ###############################################################
+        ######################  Curve Fitting #########################
+        # Curve Fitting  bpr_function_in_folder(self, x, a1, a2):
+        if func_name == 'BPR':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.bpr_function_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+                formula = f"t = t_0 * (1 + {popt[0]} * (V / C) ** {popt[1]})"
+            else:
+                popt, pcov = curve_fit(self.bpr_function_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.bpr_function(self.V_list, *popt)
+        elif func_name == 'Lu_1': # def Lu_1_in_folder(x, a1, a2, a3):
+            if none_zero == 1: 
+                popt, pcov = curve_fit(self.Lu_1_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else: 
+                popt, pcov = curve_fit(self.Lu_1_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.Lu_1(self.V_list, *popt)
+        elif func_name == 'Lu_2': # def Lu_2_in_folder(x, a1, a2):
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.Lu_2_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.Lu_2_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.Lu_2(self.V_list, *popt)
+        elif func_name == 'Lu_3': # def Lu_3_in_folder(x, a1, a2):
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.Lu_3_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.Lu_3_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.Lu_3(self.V_list, *popt)
+        elif func_name == 'Lu_4': # def Lu_4_in_folder(x, a1, a2):
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.Lu_4_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.Lu_4_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.Lu_4(self.V_list, *popt)
+        elif func_name == 'TRUCK1': # 
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.TRUCK1_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.TRUCK1_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.TRUCK1(self.V_list, *popt)
+        elif func_name == 'TRUCK2': # 
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.TRUCK2_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.TRUCK2_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.TRUCK2(self.V_list, *popt)
+        elif func_name == 'TRUCK3':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.TRUCK3_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.TRUCK3_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.TRUCK3(self.V_list, *popt)
+        elif func_name == 'TRUCK4':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.TRUCK4_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.TRUCK4_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.TRUCK4(self.V_list, *popt)
+        elif func_name == 'TRUCK5':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.TRUCK5_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.TRUCK5_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.TRUCK5(self.V_list, *popt)
+        elif func_name == 'TRUCK6':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.TRUCK6_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.TRUCK6_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.TRUCK6(self.V_list, *popt)
+        elif func_name == 'TRUCK7':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.TRUCK7_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.TRUCK7_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.TRUCK7(self.V_list, *popt)
+        elif func_name == 'TRUCK8':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.TRUCK8_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.TRUCK8_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.TRUCK8(self.V_list, *popt)
+        elif func_name == 'TRUCK9':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.TRUCK9_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.TRUCK9_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.TRUCK9(self.V_list, *popt)
+        elif func_name == 'TRUCK10':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.TRUCK10_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.TRUCK10_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.TRUCK10(self.V_list, *popt)
+        elif func_name == 'TRUCK11':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.TRUCK11_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.TRUCK11_in_folder, self.x_list, self.y_list, bounds=([0,0,0,-np.inf,-np.inf,0],np.inf), maxfev=5000) #, bounds=(0,np.inf))
+                print('4-5 음수')
+            self.t_estimated = self.TRUCK11(self.V_list, *popt)
+        elif func_name == 'TRUCK12':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.TRUCK12_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.TRUCK12_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.TRUCK12(self.V_list, *popt)
+        
+        
+        
+            
+        elif func_name == 'N1':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.N1_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.N1_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.N1(self.V_list, *popt)
+        elif func_name == 'N2':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.N2_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.N2_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.N2(self.V_list, *popt)
+        elif func_name == 'N3':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.N3_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.N3_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.N3(self.V_list, *popt)
+        elif func_name == 'N4':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.N4_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.N4_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.N4(self.V_list, *popt)
+        elif func_name == 'N5':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.N5_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.N5_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.N5(self.V_list, *popt)
+        elif func_name == 'N6':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.N6_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.N6_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.N6(self.V_list, *popt)
+            
+        elif func_name == 'R1':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.R1_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.R1_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.R1(self.V_list, *popt)
+        elif func_name == 'R2':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.R2_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.R2_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.R2(self.V_list, *popt)
+        elif func_name == 'R3':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.R3_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.R3_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.R3(self.V_list, *popt)
+        elif func_name == 'R4':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.R4_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.R4_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.R4(self.V_list, *popt)
+        elif func_name == 'R5':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.R5_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.R5_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.R5(self.V_list, *popt)
+            
+            
+            
+        elif func_name == 'C1':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C1_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+                formula = fr"$t = t_0 * ({round(popt[0], 2)} + {round(popt[1], 2)} * R_t) * (1 + {round(popt[2], 2)} * (1 + Rₒₕₕ) ** {round(popt[3], 2)} * (1 + Rₒₙₕₙ) ** {round(popt[4], 2)} * (1 + R_c) ** {round(popt[5], 2)} * (1 + R_t) ** {round(popt[6], 2)} * (V / C) ** {round(popt[7], 2)})$"
+            else:
+                if p_0 != None:
+                    popt, pcov = curve_fit(self.C1_in_folder, self.x_list, self.y_list, bounds=([0,0,0,0,0,-np.inf,-np.inf,0],np.inf), maxfev=5000, p0 = p_0) #, bounds=(0,np.inf))
+                else:
+                    popt, pcov = curve_fit(self.C1_in_folder, self.x_list, self.y_list,bounds=([0,0,0,0,0,-np.inf,-np.inf,0],np.inf), maxfev=5000) #, bounds=(0,np.inf))
+                    print('5~6 값 음수')
+                formula = fr"$t = t_0 * ({round(popt[0], 2)} + {round(popt[1], 2)} * R_t) * (1 + {round(popt[2], 2)} * (1 + Rₒₕₕ) ** {round(popt[3], 2)} * (1 + Rₒₙₕₙ) ** {round(popt[4], 2)} * (1 + R_c) ** {round(popt[5], 2)} * (1 + R_t) ** {round(popt[6], 2)} * (V / C) ** {round(popt[7], 2)})$"
+            self.t_estimated = self.C1(self.V_list, *popt)
+        elif func_name == 'C1_no':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C1_no_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+                formula = fr"$t =  ({round(popt[0], 2)} + {round(popt[1], 2)} * R_t) * (1 + {round(popt[2], 2)} * (1 + Rₒₕₕ) ** {round(popt[3], 2)} * (1 + Rₒₙₕₙ) ** {round(popt[4], 2)} * (1 + R_c) ** {round(popt[5], 2)} * (1 + R_t) ** {round(popt[6], 2)} * (V / C) ** {round(popt[7], 2)})$"
+            else:
+                popt, pcov = curve_fit(self.C1_no_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+                formula = fr"$t =  ({round(popt[0], 2)} + {round(popt[1], 2)} * R_t) * (1 + {round(popt[2], 2)} * (1 + Rₒₕₕ) ** {round(popt[3], 2)} * (1 + Rₒₙₕₙ) ** {round(popt[4], 2)} * (1 + R_c) ** {round(popt[5], 2)} * (1 + R_t) ** {round(popt[6], 2)} * (V / C) ** {round(popt[7], 2)})$"
+            self.t_estimated = self.C1_no(self.V_list, *popt)
+        elif func_name == 'C2':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C2_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.C2_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.C2(self.V_list, *popt)
+        elif func_name == 'C3':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C3_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.C3_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.C3(self.V_list, *popt)
+        elif func_name == 'C4':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C4_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.C4_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.C4(self.V_list, *popt)
+        elif func_name == 'C5':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C5_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.C5_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.C5(self.V_list, *popt)
+        elif func_name == 'C6':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C6_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.C6_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.C6(self.V_list, *popt)
+        elif func_name == 'C7':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C7_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                popt, pcov = curve_fit(self.C7_in_folder, self.x_list, self.y_list, maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.C7(self.V_list, *popt)
+        elif func_name == 'C8':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C8_in_folder, self.x_list, self.y_list, bounds=([0,0,-np.inf,-np.inf,-np.inf,-np.inf,0],np.inf), maxfev=5000)
+            else:
+                if p_0 != None:
+                    popt, pcov = curve_fit(self.C8_in_folder, self.x_list, self.y_list, bounds=([0,0,-np.inf,-np.inf,-np.inf,-np.inf,0],np.inf), maxfev=5000, p0 = p_0) #, bounds=(0,np.inf))
+                else:
+                    popt, pcov = curve_fit(self.C8_in_folder, self.x_list, self.y_list,bounds=([0,0,-np.inf,-np.inf,-np.inf,-np.inf,0],np.inf), maxfev=5000) #, bounds=(0,np.inf))
+                   
+            self.t_estimated = self.C8(self.V_list, *popt)
+        elif func_name == 'C9':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C9_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                if p_0 != None:
+                    popt, pcov = curve_fit(self.C9_in_folder, self.x_list, self.y_list, bounds=([0,0,0,-np.inf,-np.inf,-np.inf,0],np.inf), maxfev=5000, p0 = p_0) #, bounds=(0,np.inf))
+                else:
+                    popt, pcov = curve_fit(self.C9_in_folder, self.x_list, self.y_list,bounds=([0,0,0,-np.inf,-np.inf,-np.inf,0],np.inf), maxfev=5000) #, bounds=(0,np.inf))
+                    print(' 4~6  음수')
+            self.t_estimated = self.C9(self.V_list, *popt)
+        elif func_name == 'C10':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C10_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                if p_0 != None:
+                    popt, pcov = curve_fit(self.C10_in_folder, self.x_list, self.y_list, bounds=([0,0,0,-np.inf,-np.inf,0],np.inf), maxfev=5000, p0 = p_0) #, bounds=(0,np.inf))
+                else:
+                    popt, pcov = curve_fit(self.C10_in_folder, self.x_list, self.y_list,bounds=([0,0,0,-np.inf,-np.inf,0],np.inf), maxfev=5000) #, bounds=(0,np.inf))
+                    print(' 4~5  음수')
+            self.t_estimated = self.C10(self.V_list, *popt)    
+        elif func_name == 'C11':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C11_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                if p_0 != None:
+                    popt, pcov = curve_fit(self.C11_in_folder, self.x_list, self.y_list, bounds=([0,0,-np.inf,-np.inf,0],np.inf), maxfev=5000, p0 = p_0) #, bounds=(0,np.inf))
+                else:
+                    popt, pcov = curve_fit(self.C11_in_folder, self.x_list, self.y_list,bounds=([0,0,-np.inf,-np.inf,0],np.inf), maxfev=5000) #, bounds=(0,np.inf))
+                    print(' 3-4  음수')
+            self.t_estimated = self.C11(self.V_list, *popt)
+        elif func_name == 'C12':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C12_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                if p_0 != None:
+                    popt, pcov = curve_fit(self.C12_in_folder, self.x_list, self.y_list, bounds=([0,0,-np.inf,0],np.inf), maxfev=5000, p0 = p_0) #, bounds=(0,np.inf))
+                else:
+                    popt, pcov = curve_fit(self.C12_in_folder, self.x_list, self.y_list,bounds=([0,0,-np.inf,0],np.inf), maxfev=5000) #, bounds=(0,np.inf))
+                    print(' 3  음수')
+            self.t_estimated = self.C12(self.V_list, *popt)
+        elif func_name == 'C13':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C13_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                if p_0 != None:
+                    popt, pcov = curve_fit(self.C13_in_folder, self.x_list, self.y_list, bounds=([0,-np.inf,0],np.inf), maxfev=5000, p0 = p_0) #, bounds=(0,np.inf))
+                else:
+                    popt, pcov = curve_fit(self.C13_in_folder, self.x_list, self.y_list,bounds=([0,-np.inf,0],np.inf), maxfev=5000) #, bounds=(0,np.inf))
+                    print(' 2  음수')
+            self.t_estimated = self.C13(self.V_list, *popt)
+        elif func_name == 'C14':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C14_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                if p_0 != None:
+                    popt, pcov = curve_fit(self.C14_in_folder, self.x_list, self.y_list, bounds=([0,0,0,0,-np.inf,0],np.inf), maxfev=5000, p0 = p_0) #, bounds=(0,np.inf))
+                else:
+                    popt, pcov = curve_fit(self.C14_in_folder, self.x_list, self.y_list,bounds=([0,0,0,0,-np.inf,0],np.inf), maxfev=5000) #, bounds=(0,np.inf))
+                    print(' 5  음수')
+            self.t_estimated = self.C14(self.V_list, *popt)
+        elif func_name == 'C15':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C15_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                if p_0 != None:
+                    popt, pcov = curve_fit(self.C15_in_folder, self.x_list, self.y_list, bounds=([0,0,0,-np.inf,0],np.inf), maxfev=5000, p0 = p_0) #, bounds=(0,np.inf))
+                else:
+                    popt, pcov = curve_fit(self.C15_in_folder, self.x_list, self.y_list,bounds=([0,0,0,-np.inf,0],np.inf), maxfev=5000) #, bounds=(0,np.inf))
+                    print(' 4  음수 가능')
+            self.t_estimated = self.C15(self.V_list, *popt)
+        elif func_name == 'C16':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C16_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                if p_0 != None:
+                    popt, pcov = curve_fit(self.C16_in_folder, self.x_list, self.y_list, bounds=([0,0,0,0,0,0,-np.inf,-np.inf,0],np.inf), maxfev=5000) #, bounds=(0,np.inf))
+                else:
+                    popt, pcov = curve_fit(self.C16_in_folder, self.x_list, self.y_list,bounds=([0,0,0,0,0,0,-np.inf,-np.inf,0],np.inf), maxfev=5000) #, bounds=(0,np.inf))
+                    print(' 6-7  음수 가능')
+            self.t_estimated = self.C16(self.V_list, *popt)
+        elif func_name == 'C17':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C17_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                if p_0 != None:
+                    popt, pcov = curve_fit(self.C17_in_folder, self.x_list, self.y_list, bounds=([0,0,0,0,0,0,0,0],np.inf), maxfev=5000, p0 = p_0) #, bounds=(0,np.inf))
+                else:
+                    popt, pcov = curve_fit(self.C17_in_folder, self.x_list, self.y_list,bounds=([0,0,0,0,0,0,0,0],np.inf), maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.C17(self.V_list, *popt)
+        elif func_name == 'C18':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C18_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                if p_0 != None:
+                    popt, pcov = curve_fit(self.C18_in_folder, self.x_list, self.y_list, bounds=([0,0,0,0],np.inf), maxfev=5000, p0 = p_0) #, bounds=(0,np.inf))
+                else:
+                    popt, pcov = curve_fit(self.C18_in_folder, self.x_list, self.y_list,bounds=([0,0,0,0],np.inf), maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.C18(self.V_list, *popt)
+        elif func_name == 'C19':
+            if none_zero == 1:
+                popt, pcov = curve_fit(self.C19_in_folder, self.x_list, self.y_list, bounds=(0,np.inf), maxfev=5000)
+            else:
+                if p_0 != None:
+                    popt, pcov = curve_fit(self.C19_in_folder, self.x_list, self.y_list, bounds=([0,0,0,0,0,0],np.inf), maxfev=5000, p0 = p_0) #, bounds=(0,np.inf))
+                else:
+                    popt, pcov = curve_fit(self.C19_in_folder, self.x_list, self.y_list,bounds=([0,0,0,0,0,0],np.inf), maxfev=5000) #, bounds=(0,np.inf))
+            self.t_estimated = self.C19(self.V_list, *popt)
+            
+        
+        
+        #################### p-value 구하기 ###################
+        # 추정된 파라미터의 분산(pcov 대각선 요소)
+        variances = np.diag(pcov)
+        # 각 파라미터의 t-value와 p-value 계산
+        n = len(self.y_list)
+        dof = n - len(popt)
+        p_values = []
+        for i, variance in enumerate(variances):
+            t_value = popt[i] / np.sqrt(variance)
+            p_value = 2 * (1 - stats.t.cdf(np.abs(t_value), dof))
+            p_values.append(p_value)
+            if  p_value >= 0.01:
+                print(i+1, '번째 값 : ', p_value)
+                if (func_name == 'C1' or func_name =='C1_no'):
+                    if i == 1:
+                        print('linear')
+                    elif i == 3:
+                        print('off')
+                    elif i == 4:
+                        print('on')
+                    elif i == 5:
+                        print('car')
+                    elif i == 6:
+                        print('truck')
+        
+        ################## 다중공선성 확인하기 ##################
+        # 추정된 파라미터의 분산-공분산 행렬(pcov)
+        var_covar_matrix = pcov
+
+        # 추정된 파라미터의 분산(pcov 대각선 요소)
+        variances = np.diag(var_covar_matrix)
+
+        # 다중공선성 평가
+        tolerance = 1e-10  # 다중공선성을 판단할 임계값
+        multicollinearity = np.all(variances < tolerance)
+
+        if multicollinearity:
+            print("다중공선성이 감지되었습니다.")
+        else:
+            print("다중공선성이 감지되지 않았습니다.")
+                    
+        ################# 각종 지표 출력하기 ###################
+        # p-values 출력
+        print("P-values:", p_values)
+        
+        # Display parameters
+        print('파라미터!!:', popt)
+        print('self.rho = ',np.average(self.rho_list))
+        print('self.C = ', np.average(self.C_list))
+        print('self.t0 = ', np.average(self.t0_list))
+        print('self.off_list', np.average(self.off_list))
+        print('self.on_list', np.average(self.on_list))
+        
+        ####################################################################
+        ########################### Drawing ################################
+        ####### 5. curve fitting 및 그래프 그리기 #######
+        
+       ################################################################################## 
+        
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        # 임의의 데이터 생성
+        X = np.linspace(0, 1, 101)  # X 축 데이터
+        Y = np.linspace(0, 1, 15)  # Y 축 데이터  
+        print(Y)
+        X, Y = np.meshgrid(X, Y)  # 2차원 그리드 생성
+        Zs = np.random.randint(0, 30000, (15, 101))  # Z 축 데이터 (임의의 정수값)
+
+        # 3D 와이어프레임 그래프 생성
+        fig = plt.figure(figsize=(12, 10))
+        ax = fig.add_subplot(111, projection='3d')
+        print(X.shape) #(15,101)
+        print(Y.shape) #(15,101)
+        print(Zs.shape) # (15,101)
+
+        ax.plot_surface(Y, X, Zs, alpha=0.5, linewidth=0.5)
+
+        y_ticks = np.arange(0, 1.1, 0.1)
+        ax.set_yticks(y_ticks)
+
+        for h in Y[0]:
+            idx = np.where(Y[0] == h)[0][0]
+            if h == 0.6:
+                ax.plot([Y[0, idx]], [X[0, idx]], [Zs[0, idx]], linewidth=0.5, color='red')
+                continue
+            ax.plot([Y[0, idx]], [X[0, idx]], [Zs[0, idx]], linewidth=0.5, color='blue')
+
+        ax.set_zlim(0, 30000)
+        ax.view_init(20, -40)
+
+#         plt.show()
+        ################################################################################## 
+        
+        # 0, 100, 10, 20, ..., 90 순서를 제대로 다시 함. 
+        if self.XXX == 'HGV':  # 순서가 100, 10, 20, 30, 40, ... 이런식으로 되어있음. 
+            temp_list = self.averaged_V_list[0]
+            temp_list2 = self.file_name_list[0]
+            del self.averaged_V_list[0]
+            del self.file_name_list[0]
+            self.averaged_V_list.append(temp_list) # 10, 20, 30, ..., 100 으로 만듬
+            self.file_name_list.append(temp_list2) # 10, 20, 30, ..., 100 으로 만듬
+        print("self.file_name_list : ", self.file_name_list) # 한번 출력해보고 검증하자. 
+        # LOV의 경우 0, 10, 20, ..., 90임. 
+        
+        
+        X = self.averaged_V_list # capacity에 의해 잘리지 않음. 20 ~ 35 총 11개.
+        print("len(X)", len(X))
+        print('11이어야 함  : ', len(X))
+        
+        Y = self.averaged_rho_list  
+        Zs = [] # 걍 list 인데?
+        
+        X, Y = np.meshgrid(X, Y)  # 2차원 그리드 생성
+        Zs = np.array(self.averaged_t_list) # shape 이 11,16임. (truck의 비율, 20~35의 16개 volume level)
+        
+        
+        
+        ############## 3D 그래프 크기 설정 ##############
+        fig = plt.figure(figsize = (12,10))
+        print(X.shape) #(160, 176)
+        print(Y.shape) #(160, 176)
+        print(Zs.shape) # (11, 16)
+
+        
+        ax = fig.add_subplot(111, projection='3d')
+        ax.plot_surface(Y, X, Zs, alpha=0.5, linewidth=0.5)
+        y_ticks = np.arange(1.0,0,0.1)
+        ax.set_yticks(y_ticks)
+        
+        
+        for h in self.averaged_rho_list:  # truck의 비율 --> 100부터 0%까지 내려오면서 하는게 낫겟다.
+            idx = np.where(Y==h)[0][0]
+            if h == 0.6: # x value
+                ax.plot(Y[idx], X[idx], Zs[idx], linewidth=0.5, color='red')
+                continue
+            ax.plot(Y[idx], X[idx], Zs[idx], linewidth=0.5, color='blue')
+
+
+        #ax.set_zlim(0, 30000)
+        ax.view_init(20, -40)
+
+            
+        
+        
+        
+        
+        
+        
+        ############## 2D 그래프 크기 설정 ##############
+#         print("np.max(self.V_list) : ", np.max(self.V_list))
+#         if np.max(self.V_list) > 10000:
+#             plt.figure(figsize=(15, 6))# 전체 그래프의 크기 설정
+#         else:
+#             plt.figure(figsize=(10, 6))# 전체 그래프의 크기 설정
+#         xticks = np.arange(0, (np.max(self.V_list)//500 + 2) * 500, 500)
+#         plt.xticks(xticks)
+        
+#         ##################### Original Data ######################
+#         temp_list = sorted(list(set(self.file_name_list)))  # 중복되지 않는 name_list의 값들을 추출
+        
+#         colors = ['gray', 'cyan', 'red', 'green', 'blue', 'magenta', 'brown', 'olive', 'black', 'teal', 'navy', 'lime',
+#         'pink', 'purple', 'orange', 'yellow', 'gold', 'silver', 'violet', 'indigo', 'aqua', 'coral', 'crimson',
+#         'darkgreen', 'deepskyblue', 'hotpink', 'limegreen', 'salmon', 'steelblue', 'tomato', 'khaki', 'lightblue',
+#         'darkorange', 'mediumseagreen', 'orchid', 'mediumslateblue', 'sandybrown', 'seagreen', 'slategray', 'royalblue',
+#         'peru', 'slateblue', 'turquoise', 'darkviolet', 'chocolate', 'mediumvioletred', 'darkslateblue', 'springgreen']
+
+#         color_dict = {}  # 각 name에 대한 색상을 저장할 딕셔너리
+
+#         for i, name in enumerate(temp_list):
+#             if len(temp_list) > len(colors):
+#                 color_dict[name] = colors[i % len(colors)]  # 각 name에 색상을 할당
+#             else:
+#                 color_dict[name] = colors[i]
+
+#         # 데이터 점 찍기
+#         for v, t, name in zip(self.V_list, self.t_list, self.file_name_list):
+#             color = color_dict[name]  # name에 해당하는 색상 가져오기
+#             plt.scatter(v, t, c=color)
+            
+    
+#         ##################### Estimated Data ######################
+#         # 데이터를 평균화할 구간 크기
+#         average_interval = 5 
+#         self.V_list_averaged = [] # 초기화
+#         self.t_estimated_averaged = [] # 초기화
+#         self.file_name_list_averaged = [] # 초기화
+
+#         # V_list와 t_estimated를 앞에서부터 average_interval 크기로 나누어 평균 계산 ( 평균 할 필요 없었는데.. 사실은.. )
+#         self.V_list_averaged = [np.mean(self.V_list[i:i+average_interval]) for i in range(0, len(self.V_list), average_interval)]
+#         self.t_estimated_averaged = [np.mean(self.t_estimated[i:i+average_interval]) for i in range(0, len(self.t_estimated), average_interval)]
+#         for i in range(0, len(self.file_name_list), average_interval): # 얘는 이름 넣기
+#             self.file_name_list_averaged.append(self.file_name_list[i])
+            
+#         # Cycle마다의 데이터를 저장할 리스트
+#         cycle_data = []
+#         cycle_start = 0        
+
+#         # Cycle을 구분하기 위해 V_list_averaged를 순회하면서 데이터를 처리
+#         for i in range(1, len(self.V_list_averaged)):
+#             # 이전 값보다 현재 값이 작다면 Cycle의 끝이라고 간주
+#             if self.V_list_averaged[i] < self.V_list_averaged[i-1]:
+#                 # Cycle 데이터를 추출하여 리스트에 저장
+#                 cycle_data.append((self.V_list_averaged[cycle_start:i], self.t_estimated_averaged[cycle_start:i], self.file_name_list_averaged[cycle_start:i]))
+#                 cycle_start = i
+#         cycle_data.append((self.V_list_averaged[cycle_start:], self.t_estimated_averaged[cycle_start:], self.file_name_list_averaged[cycle_start:i]))
+
+#         # Cycle별로 그래프를 그림
+#         for i, data in enumerate(cycle_data):
+#             # Cycle 데이터
+#             V_data, t_data, file_name = data
+#             # Cycle의 파일 이름
+#             filename = file_name[0]
+#             # 선 색상 설정 (파란색부터 시작하며, 다음 색상으로 순환)
+#             color = color_dict[filename]  # name에 해당하는 색상 가져오기
+#             # 선 그래프 그리기
+#             plt.plot(V_data, t_data, c=color, label=filename)
+            
+#         plt.scatter(self.V_list_averaged, self.t_estimated_averaged, c='orange', label=func_name)
+#         plt.xlabel("Volume[veh]")
+#         plt.ylabel("Travel Time[s]")
+
+#         plt.title(f"{A} _ {func_name}")
+
+
+        ##########################################################################
+        ######################### R^2 를 이용한 검증 #############################
+        # Calculate r^2 and Add R-squared value to the plot
+        result1 = np.array(self.t_list)
+        result2 = np.array(self.t_estimated)
+        self.r_squared = self.calculate_r_squared(result1, result2)
+#         plt.text(0.95, 0.05, f'R-squared = {self.r_squared:.2f}', transform=plt.gca().transAxes, ha='right')
+        self.val_result.append(self.r_squared)
+        print(A, '_', XXX)
+        print(func_name)
+        
+        # 수식 적기
+#         plt.text(0, 1.1, formula, transform=plt.gca().transAxes)
+
+#         plt.legend(loc='lower right', bbox_to_anchor=(1.0, 1.0), bbox_transform=plt.gca().transAxes)
+        plt.show()
+
+        
+        
+        
+        
+        
+        
+        
+        
+    def parameters_check(self, func_name, folder_path, limits=None, params=None):
+        # 특정 함수 (func_name)를 주어진 데이터와 함께 그려보기. params 주어진대로
+        
+        for file_name, limit in zip(os.listdir(folder_path), limits):
+            if file_name.endswith(".csv"):
+                print('-------------------------------------------------------------------------------------------------')
+                print('-------------------------------------------------------------------------------------------------')
+                #### 비우고 시작 ####
+                self.averaged_V = [] 
+                self.averaged_t = []
+                self.V = []
+                self.t = []
+                print('limit : ', limit)
+                print("file_name : ", file_name)
+                
+                
+                file_path = os.path.join(folder_path, file_name)
+                
+                ##### 1. 파일 이름 분석하기 #####
+                parts = file_name.split("_")
+                A = int(parts[0])
+                B = int(parts[1])
+                XXX = parts[3].split(".")[0]
+                
+                # 할 필요 없는 상황 없애기
+                if (B==0 and XXX=='HGV') or (B==100 and XXX=='LOV'):
+                    continue
+                
+                ##### 2. 데이터 읽어들이기 #####
+                data = pd.read_csv(file_path)
+                self.V = data["index"].values
+                self.t = data[f"{A}_{B}%_{XXX}"].values
+                print("file_name : ", file_name)
+                
+                ##### 3. 5개의 점 Averaging #####
+                for i in range(0, len(self.V), 5): # 한줄에 다섯개씩이니까 이렇게 됨
+                    average = np.average(self.V[i:i+5])
+                    self.averaged_V.append(average)
+                for i in range(0, len(self.t), 5): # 한줄에 다섯개씩이니까 이렇게 됨
+                    average = np.average(self.t[i:i+5])
+                    self.averaged_t.append(average)
+                
+                ##### 4. Capacity 설정하기 ######                    
+                if limit != 0:           
+                    self.C = limit
+                    print('[capacity] 주어진 값으로 capacity 설정 완료')
+                else: # limit = 0일 경우
+                    self.C = self.calculate_C(A)         
+
+                self.t0 = self.calculate_t0(XXX, B)
+                if self.calculate_t0(XXX, B) is None:
+                    continue
+                
+                
+                ################################################
+                ####### 5. curve fitting 및 그래프 그리기 ######
+                
+                ##### 6. 사전에 설정된 capacity에 따라 데이터 자르기 #####
+                if len(self.V) > 0:
+                    print("self.C:", self.C)
+                    indices = np.where(self.V > self.C)[0]
+                    if len(indices) != 0:
+                        self.newV = self.V[:indices[0]]
+                        self.newt = self.t[:indices[0]]
+                        if np.max(self.newV)!=0:
+                            print('max V:', np.max(self.newV))
+                else:
+                    print("No data points in the valid range.")
+                
+#                 self.newV = np.array(self.newV)
+#                 self.newt = np.array(self.newt)
+                
+                
+                # Curve Fitting
+                if func_name == 'BPR':
+                    self.t_estimated = self.bpr_function_one(self.newV, *params)
+                    self.fitted_func = 'standard BPR'
+                    
+                elif func_name == 'Lu':
+                    self.fitted_func = 'Lu et al.(2016)'
+                    if XXX=='LOV' and B <= 40:
+                        self.rho = B * 0.01 # 이것도 함수의 내용에 필요함. 
+                        self.t_estimated = self.Lu_1_one(self.newV, 0.29, 2.62, 1.97)
+                    elif XXX=='LOV' and B > 40:
+                        self.t_estimated = self.Lu_2_one(self.newV, 0.62, 1.26)
+                    elif XXX=='HGV' and B <= 40:
+                        self.t_estimated = self.Lu_3_one(self.newV, 0.12, 1.87)
+                    elif XXX=='HGV' and B > 40:
+                        self.t_estimated = self.Lu_4_one(self.newV, 0.10, 1.26)
+                    elif XXX=='AVG':
+                        continue
+                    
+
+                # Drawing
+                print("np.max(self.V) : ", np.max(self.V))
+                if  np.max(self.V) > 10000:
+                    plt.figure(figsize=(15, 6))# 전체 그래프의 크기 설정
+                else:
+                    plt.figure(figsize=(10, 6))# 전체 그래프의 크기 설정
+                xticks = np.arange(0, (np.max(self.V)//500 + 2) * 500, 500)
+                plt.xticks(xticks)
+                
+                plt.scatter(self.V, self.t, label="Spillback Occurred Data Points")
+
+                plt.scatter(self.newV, self.newt, label="Valid Data Points")
+                plt.scatter(self.averaged_V, self.averaged_t, label="Average Data Points")
+#                 plt.plot(self.newV, self.t_estimated, 'r-', label=self.fitted_func)
+                plt.xlabel("Volume, PCU/h")
+                if XXX=='LOV':
+                    plt.ylabel("Travel time of cars (s)")
+                elif XXX=='HGV':
+                    plt.ylabel("Travel time of trucks (s)")
+                plt.title(f"Road type A, Car 90%, Truck 10%")
+               
+                
+                # Display parameters
+                print('params:', params)
+                
+                # Calculate r^2 and Add R-squared value to the plot
+                self.r_squared = self.calculate_r_squared(self.newt, self.t_estimated)
+#                 plt.text(0.95, 0.05, f'R-squared = {self.r_squared:.2f}', transform=plt.gca().transAxes, ha='right')
+                self.val_result.append(self.r_squared)
+                # x축과 y축 눈금 설정
+
+
+                # 격자 그리드 추가
+                plt.grid(True)
+                plt.legend()
+                plt.show()
+
+                
+from datetime import datetime
+now = datetime.now()
+print("현재 : ", now, ' 에 class 선언 완료')
+
+
